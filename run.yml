@@ -1,0 +1,67 @@
+---
+- hosts: rtcont
+  connection: local
+  vars:
+    cont_passwd: "test"
+    cont_img: "rtlabs_img"
+    cont_name: "rtlabs_cont"
+    web_port: 9080
+  tasks: 
+  - name: install docker pkg
+    pip: name=docker state=present
+
+  - name: create cont dir if not exist
+    file: state=directory name=cont
+
+  - name: change cont passwd
+    template:
+      src: tmpl/Dockerfile.j2
+      dest: cont/Dockerfile
+
+  - name: create docker container
+    docker_image:
+      path: cont
+      name: "{{ cont_img }}"
+
+  - name: run our container
+    docker_container:
+      image: "{{ cont_img }}"
+      state: started
+      name: "{{ cont_name }}"
+      recreate: true
+      published_ports:
+      - "0.0.0.0:{{ web_port }}:80"
+      - "22"
+    register: ttt
+
+  - set_fact:
+      ansible_ssh_port: "{{ ttt.ansible_facts.docker_container.NetworkSettings.Ports['22/tcp'][0]['HostPort'] }}"
+      ansible_ssh_user: "root"
+      ansible_ssh_pass: "{{ cont_passwd }}"
+      ansible_ssh_host: "127.0.0.1"
+
+- hosts: rtcont
+  gather_facts: no
+  tasks:
+  - raw: "apt update && apt -y install python"
+
+- hosts: rtcont
+  tasks:
+  - apt: name={{ item }} state=latest
+    with_items:
+    - nginx
+    - nginx-extras
+
+  - copy:
+      src: tmpl/hello_world.sh
+      dest: /var/www/html 
+      mode: 0700
+      owner: www-data
+
+  - copy:
+      src: tmpl/default
+      dest: /etc/nginx/sites-enabled
+      mode: 0700
+      owner: www-data
+
+  - shell: /etc/init.d/nginx start
